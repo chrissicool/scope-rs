@@ -1,0 +1,12 @@
+[package]
+name = "scope-rs"
+version = "0.1.0"
+authors = ["Christian Ludwig <chrissicool@gmail.com"]
+edition = "2021"
+description = "Create cscope and ctags databases really fast."
+repository = "https://github.com/chrissicool/scope-rs"
+license = "Beerware"
+publish = false
+
+[dependencies]
+clap = { version = "~4.4", features = ["derive"] }
