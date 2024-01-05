@@ -316,6 +316,8 @@ impl fmt::Display for DriverList {
 
 
 /// File crawler thread that populates the list of files to scan.
+///
+/// After creation, feels like a std::thread.
 pub struct FileCrawlerThread {
     thread: thread::JoinHandle<()>,
 }
