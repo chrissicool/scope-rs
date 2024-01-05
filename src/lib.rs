@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -14,7 +14,7 @@ pub trait Driver
 {
     fn name(&self) -> &str;
     fn usable(&self) -> bool;
-    fn run(&self, path: &PathBuf) -> Result<String, Box<dyn Error>>;
+    fn run(&self, path: &Path) -> Result<String, Box<dyn Error>>;
 }
 
 /// A driver that uses the file(1) tool for mime type checks.
@@ -44,7 +44,7 @@ impl Driver for FileDriver {
             .spawn().is_ok()
     }
 
-    fn run(&self, path: &PathBuf) -> Result<String, Box<dyn Error>> {
+    fn run(&self, path: &Path) -> Result<String, Box<dyn Error>> {
         let mut cmd = Command::new("file");
         cmd.args(["-b", "--mime-type"]);
         let out = cmd.arg(path).output()?;
@@ -80,7 +80,7 @@ impl Driver for MimeDriver {
             .spawn().is_ok()
     }
 
-    fn run(&self, path: &PathBuf) -> Result<String, Box<dyn Error>> {
+    fn run(&self, path: &Path) -> Result<String, Box<dyn Error>> {
         let mut cmd = Command::new("xdg-mime");
         cmd.args(["query", "filetype"]);
         let out = cmd.arg(path).output()?;
@@ -115,7 +115,7 @@ impl Driver for GenericDriver {
     }
 
     #[inline]
-    fn run(&self, path: &PathBuf) -> Result<String, Box<dyn Error>> {
+    fn run(&self, path: &Path) -> Result<String, Box<dyn Error>> {
         match self {
             GenericDriver::MimeDriver(driver) => driver.run(path),
             GenericDriver::FileDriver(driver) => driver.run(path),
@@ -153,35 +153,29 @@ impl DriverList {
     pub fn new(select: Option<OsString>, inspect: bool) -> Self {
         let mut current: GenericDriver = MimeDriver::new().into();
         // Push order determines preference.
-        let mut drivers = Vec::new();
-        drivers.push(current.clone());
-        drivers.push(FileDriver::new().into());
+        let drivers = vec![current, FileDriver::new().into()];
         for d in drivers.iter() {
             match select {
                 None => {
                     if d.usable() {
-                        current = d.clone();
+                        current = *d;
                         break;
                     }
                 }
                 Some(ref name) => {
                     if d.name() == name {
-                        current = d.clone();
+                        current = *d;
                         break;
                     }
                 }
             }
         }
 
-        DriverList {
-            drivers: drivers,
-            current: current,
-            inspect: inspect,
-        }
+        DriverList { drivers, current, inspect, }
     }
 
-    pub fn by_extension(&self, path: &PathBuf) -> bool {
-        const EXTENSIONS: &'static [&'static str] = &[
+    pub fn by_extension(&self, path: &Path) -> bool {
+        const EXTENSIONS: &[&str] = &[
             "asm",
             "c",
             "cc",
@@ -210,7 +204,7 @@ impl DriverList {
 
         if let Some(ext) = path.extension() {
             for e in EXTENSIONS.iter() {
-                if e.to_string() == ext.to_string_lossy() {
+                if *e == ext.to_string_lossy() {
                     return true;
                 }
             }
@@ -219,8 +213,8 @@ impl DriverList {
         false
     }
 
-    pub fn by_mime(&self, _path: &PathBuf, mime: &String) -> bool {
-        const MIMETYPES: &'static [&'static str] = &[
+    pub fn by_mime(&self, _path: &Path, mime: &str) -> bool {
+        const MIMETYPES: &[&str] = &[
             // from shared-mime-info
             "rust",
             "x-c++",
@@ -254,7 +248,7 @@ impl DriverList {
 
     pub fn inspect(&self,
         reason: &str,
-        path: &PathBuf,
+        path: &Path,
         mime: Option<&String>,
         verbose: bool,
     ) {
@@ -296,7 +290,7 @@ impl Driver for DriverList {
         self.current.usable()
     }
 
-    fn run(&self, path: &PathBuf) -> Result<String, Box<dyn Error>> {
+    fn run(&self, path: &Path) -> Result<String, Box<dyn Error>> {
         if self.usable() {
             self.current.run(path)
         } else {
@@ -307,20 +301,19 @@ impl Driver for DriverList {
 
 impl fmt::Display for DriverList {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut i = 0;
-        for d in self.drivers.iter() {
+        for (i, d) in self.drivers.iter().enumerate() {
             write!(f, "[{}] {}", i, d.name())?;
             if ! d.usable() {
                 write!(f, " (!)")?;
             } else if d.name() == self.current.name() {
                 write!(f, " (*)")?;
             }
-            writeln!(f, "")?;
-            i += 1;
+            writeln!(f)?;
         }
         Ok(())
     }
 }
+
 
 /// File crawler thread that populates the list of files to scan.
 pub struct FileCrawlerThread {
@@ -338,9 +331,8 @@ impl FileCrawlerThread {
                 FileCrawlerThread::crawl(&path, &files, &excludes).unwrap();
             }
         });
-        FileCrawlerThread {
-            thread: handle,
-        }
+
+        FileCrawlerThread { thread: handle, }
     }
 
     pub fn is_finished(&self) -> bool { self.thread.is_finished() }
@@ -393,11 +385,7 @@ impl TagFileCreator {
             .stderr(Stdio::null())
             .spawn()?;
 
-        Ok(TagFileCreator {
-            scanned_files: scanned_files,
-            cscope: cscope,
-            ctags: ctags,
-        })
+        Ok(TagFileCreator { scanned_files, cscope, ctags, })
     }
 
     /// Find a working Exuberant Ctags variant.

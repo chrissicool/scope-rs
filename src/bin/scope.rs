@@ -92,14 +92,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             Arc::clone(&scanned_files) // Consumer
     )?;
 
-    // XXX Too Unixiy.
-    const EXCLUDES: &'static [&'static str] = &[
+    // XXX Too Unixy.
+    const EXCLUDES: &[&str] = &[
         "/.git/",
         "/.svn/",
         "/CVS/",
     ];
     let mut excludes = args.excludes;
-    excludes.retain(|x| x != "");
+    excludes.retain(|x| !x.is_empty());
     for x in EXCLUDES {
         excludes.push((**x).to_string());
     }
