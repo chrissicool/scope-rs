@@ -60,11 +60,33 @@ struct Args {
     jobs: usize,
 
     /// Files and directories to exclude.
-    #[arg(short = 'x', long, default_value = "", value_delimiter = ',')]
-    excludes: Vec<String>,
+    #[arg(short = 'x', long, value_delimiter = ',')]
+    excludes: Option<Vec<String>>,
 
     #[arg(last = true, default_value = ".")]
     dir: Vec<PathBuf>,
+}
+
+/// Make a list of excludes from an optional list of excludes.
+///
+/// Also add the default list of excludes to the result.
+fn make_excludes(excludes: Option<Vec<String>>) -> Vec<String> {
+    let mut result: Vec<String> = vec![];
+    // XXX Too Unixy.
+    const EXCLUDES: &[&str] = &[
+        "/.git/",
+        "/.svn/",
+        "/CVS/",
+    ];
+
+    if let Some(x) = excludes {
+        result = x;
+    }
+    for x in EXCLUDES {
+        result.push((**x).to_string());
+    }
+
+    result
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -92,20 +114,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             Arc::clone(&scanned_files) // Consumer
     )?;
 
-    // XXX Too Unixy.
-    const EXCLUDES: &[&str] = &[
-        "/.git/",
-        "/.svn/",
-        "/CVS/",
-    ];
-    let mut excludes = args.excludes;
-    excludes.retain(|x| !x.is_empty());
-    for x in EXCLUDES {
-        excludes.push((**x).to_string());
-    }
     let crawler = Arc::new(FileCrawlerThread::new(
         args.dir,
-        excludes,
+        make_excludes(args.excludes),
         Arc::clone(&files_to_scan), // Producer
     ));
 
