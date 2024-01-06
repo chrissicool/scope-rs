@@ -264,17 +264,6 @@ impl DriverList {
     }
 }
 
-#[derive(Debug, Clone)]
-struct DriverUnusableError;
-
-impl fmt::Display for DriverUnusableError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "No usable driver found.")
-    }
-}
-
-impl Error for DriverUnusableError {}
-
 impl Driver for DriverList {
     #[inline]
     fn name(&self) -> &str {
@@ -294,7 +283,7 @@ impl Driver for DriverList {
         if self.usable() {
             self.current.run(path)
         } else {
-            Err(DriverUnusableError.into())
+            Err("No usable driver found.".into())
         }
     }
 }
