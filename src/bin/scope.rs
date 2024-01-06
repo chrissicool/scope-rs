@@ -1,5 +1,3 @@
-#![doc = include_str!("../../README.md")]
-
 use std::collections::VecDeque;
 use std::error::Error;
 use std::ffi::OsString;
@@ -19,7 +17,10 @@ use scope_rs::{
 };
 
 
-fn jobs_parser(jobs: &str) -> Result<usize,clap::error::Error> {
+/// Parse jobs parameter into a `usize`.
+///
+/// The validation includes that there is at least one job.
+fn jobs_parser(jobs: &str) -> Result<usize, clap::error::Error> {
     let err = clap::error::Error::new(clap::error::ErrorKind::ValueValidation);
     match jobs.parse::<usize>() {
         Ok(result) => {
@@ -33,6 +34,7 @@ fn jobs_parser(jobs: &str) -> Result<usize,clap::error::Error> {
     }
 }
 
+/// Command line arguments.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {

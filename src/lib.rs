@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::collections::VecDeque;
 use std::error::Error;
 use std::ffi::OsString;
@@ -10,6 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// Generic driver abstraction.
+///
+/// Each mime-type driver needs to implement this trait.
 pub trait Driver
 {
     fn name(&self) -> &str;
@@ -90,8 +94,12 @@ impl Driver for MimeDriver {
 }
 
 
-#[derive(Debug, Clone, Copy)]
 // A generic driver that abstracts all available drivers.
+//
+// This is the basis for a thread-safe approach to a List of Driver implementations.
+// Dynamic traits will not do this. So bite the bullet and add a new Enum value for each driver.
+// That also means to forward the interface accordingly.
+#[derive(Debug, Clone, Copy)]
 enum GenericDriver {
     MimeDriver(MimeDriver),
     FileDriver(FileDriver),
@@ -353,7 +361,10 @@ impl FileCrawlerThread {
 }
 
 
-/// Tag file creator for Ctags and Cscope.
+/// Tag file creator for Ctags and Cscope databases.
+///
+/// Create the tags databases for ctags and cscope in parallel
+/// for each file comming in from the `scanned_files` queue.
 pub struct TagFileCreator {
     scanned_files: Arc<Mutex<VecDeque<PathBuf>>>,
     cscope: Child,
