@@ -367,8 +367,8 @@ impl FileCrawlerThread {
 /// for each file comming in from the `scanned_files` queue.
 pub struct TagFileCreator {
     scanned_files: Arc<Mutex<VecDeque<PathBuf>>>,
-    cscope: Child,
-    ctags: Child,
+    cscope: Option<Child>,
+    ctags: Option<Child>,
 }
 
 impl TagFileCreator {
@@ -379,13 +379,25 @@ impl TagFileCreator {
             .args(["-bqki", "-"])
             .stdin(Stdio::piped())
             .stderr(Stdio::null())
-            .spawn()?;
+            .spawn()
+            .ok();
 
         let ctags = TagFileCreator::find_ctags()?
             .args(["-L", "-", "--extra=+q", "--fields=+i"])
             .stdin(Stdio::piped())
             .stderr(Stdio::null())
-            .spawn()?;
+            .spawn()
+            .ok();
+
+        if cscope.is_none() {
+            eprintln!("Cannot run cscope.");
+        }
+        if ctags.is_none() {
+            eprintln!("Cannot run Exuberant ctags.");
+        }
+        if ctags.is_none() && cscope.is_none() {
+            return Err("Cannot create any tag file database.".into());
+        }
 
         Ok(TagFileCreator { scanned_files, cscope, ctags, })
     }
@@ -419,11 +431,15 @@ impl TagFileCreator {
             let mut write: Box<&mut dyn Write> = Box::new(&mut write_vec);
             writeln!(write, "{}", file.display())?;
 
-            let cscope_stdin = self.cscope.stdin.as_mut().ok_or("Cscope died.")?;
-            cscope_stdin.write_all(write_vec.as_slice())?;
+            if let Some(ref mut cscope) = self.cscope {
+                let cscope_stdin = cscope.stdin.as_mut().ok_or("Cscope died.")?;
+                cscope_stdin.write_all(write_vec.as_slice())?;
+            }
 
-            let ctags_stdin = self.ctags.stdin.as_mut().ok_or("Ctags died.")?;
-            ctags_stdin.write_all(write_vec.as_slice())?;
+            if let Some(ref mut ctags) = self.ctags {
+                let ctags_stdin = ctags.stdin.as_mut().ok_or("Ctags died.")?;
+                ctags_stdin.write_all(write_vec.as_slice())?;
+            }
         }
         Ok(())
     }
@@ -434,14 +450,20 @@ impl TagFileCreator {
 /// Close stdin for ctags and cscope and wait for their termination.
 impl Drop for TagFileCreator {
     fn drop(&mut self) {
-        {
-            let mut stdin = self.cscope.stdin.take().unwrap();
+        if let Some(ref mut cscope) = self.cscope {
+            let mut stdin = cscope.stdin.take().unwrap();
             stdin.flush().unwrap_or_default();
-            let mut stdin = self.ctags.stdin.take().unwrap();
+        }
+        if let Some(ref mut ctags) = self.ctags {
+            let mut stdin = ctags.stdin.take().unwrap();
             stdin.flush().unwrap_or_default();
         }
 
-        self.cscope.wait().unwrap_or_default();
-        self.ctags.wait().unwrap_or_default();
+        if let Some(ref mut cscope) = self.cscope {
+            cscope.wait().unwrap_or_default();
+        }
+        if let Some(ref mut ctags) = self.ctags {
+            ctags.wait().unwrap_or_default();
+        }
     }
 }
