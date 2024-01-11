@@ -9,7 +9,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 /// Generic driver abstraction.
 ///
@@ -312,50 +311,47 @@ impl fmt::Display for DriverList {
 }
 
 
-/// File crawler thread that populates the list of files to scan.
+/// File crawler that populates the list of files to scan.
 ///
 /// After creation, feels like a std::thread.
-pub struct FileCrawlerThread {
-    thread: thread::JoinHandle<()>,
+pub struct FileCrawler {
+    paths: Vec<PathBuf>,
+    excludes: Vec<String>,
+    files: Arc<Mutex<VecDeque<PathBuf>>>,
 }
 
-impl FileCrawlerThread {
+impl FileCrawler {
     pub fn new(
         paths: Vec<PathBuf>,
         excludes: Vec<String>,
         files: Arc<Mutex<VecDeque<PathBuf>>>,
     ) -> Self {
-        let handle = thread::spawn(move|| {
-            for path in paths {
-                FileCrawlerThread::crawl(&path, &files, &excludes).unwrap();
-            }
-        });
-
-        FileCrawlerThread { thread: handle, }
+        FileCrawler { paths, excludes, files, }
     }
 
-    pub fn is_finished(&self) -> bool { self.thread.is_finished() }
-    pub fn join(self) -> thread::Result<()> { self.thread.join() }
+    pub fn run(&self) -> Result<(), Box<dyn Error>> {
+        for path in &self.paths {
+            self.crawl(path)?;
+        };
+        Ok(())
+    }
 
-    fn crawl(
-        path: &PathBuf,
-        files: &Arc<Mutex<VecDeque<PathBuf>>>,
-        excludes: &Vec<String>,
-    ) -> Result<(), Box<dyn Error>> {
+    fn crawl(&self, path: &Path) -> Result<(), Box<dyn Error>> {
         if path.exists() {
-            if excludes.iter().any(|x| {
+            if self.excludes.iter().any(|x| {
                 path.display().to_string().contains(x)
             }) {
                 return Ok(());
             }
-            files.lock().unwrap().push_back(path.clone());
+            self.files.lock().unwrap().push_back(path.to_path_buf().clone());
             if path.is_dir() {
                 for entry in fs::read_dir(path)? {
                     let path = entry?.path();
-                    FileCrawlerThread::crawl(&path, files, excludes)?;
+                    self.crawl(&path)?;
                 }
             }
         }
+
         Ok(())
     }
 }
@@ -366,15 +362,12 @@ impl FileCrawlerThread {
 /// Create the tags databases for ctags and cscope in parallel
 /// for each file comming in from the `scanned_files` queue.
 pub struct TagFileCreator {
-    scanned_files: Arc<Mutex<VecDeque<PathBuf>>>,
     cscope: Option<Child>,
     ctags: Option<Child>,
 }
 
 impl TagFileCreator {
-    pub fn new(
-        scanned_files: Arc<Mutex<VecDeque<PathBuf>>>,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn new() -> Result<Self, Box<dyn Error>> {
         let cscope = Command::new("cscope")
             .args(["-bqki", "-"])
             .stdin(Stdio::piped())
@@ -399,7 +392,7 @@ impl TagFileCreator {
             return Err("Cannot create any tag file database.".into());
         }
 
-        Ok(TagFileCreator { scanned_files, cscope, ctags, })
+        Ok(TagFileCreator { cscope, ctags, })
     }
 
     /// Find a working Exuberant Ctags variant.
@@ -425,21 +418,19 @@ impl TagFileCreator {
         }
     }
 
-    pub fn run(&mut self) -> Result<(), Box<dyn Error>> {
-        while let Some(file) = self.scanned_files.lock().unwrap().pop_front() {
-            let mut write_vec: Vec<u8> = vec!();
-            let mut write: Box<&mut dyn Write> = Box::new(&mut write_vec);
-            writeln!(write, "{}", file.display())?;
+    pub fn writeln(&mut self, path: &Path) -> Result<(), Box<dyn Error>> {
+        let mut write_vec: Vec<u8> = vec!();
+        let mut write: Box<&mut dyn Write> = Box::new(&mut write_vec);
+        writeln!(write, "{}", path.display())?;
 
-            if let Some(ref mut cscope) = self.cscope {
-                let cscope_stdin = cscope.stdin.as_mut().ok_or("Cscope died.")?;
-                cscope_stdin.write_all(write_vec.as_slice())?;
-            }
+        if let Some(ref mut cscope) = self.cscope {
+            let cscope_stdin = cscope.stdin.as_mut().ok_or("Cscope died.")?;
+            cscope_stdin.write_all(write_vec.as_slice())?;
+        }
 
-            if let Some(ref mut ctags) = self.ctags {
-                let ctags_stdin = ctags.stdin.as_mut().ok_or("Ctags died.")?;
-                ctags_stdin.write_all(write_vec.as_slice())?;
-            }
+        if let Some(ref mut ctags) = self.ctags {
+            let ctags_stdin = ctags.stdin.as_mut().ok_or("Ctags died.")?;
+            ctags_stdin.write_all(write_vec.as_slice())?;
         }
         Ok(())
     }

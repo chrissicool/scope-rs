@@ -3,7 +3,7 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
 extern crate clap;
@@ -12,7 +12,7 @@ use clap::Parser;
 use scope_rs::{
     Driver,
     DriverList,
-    FileCrawlerThread,
+    FileCrawler,
     TagFileCreator,
 };
 
@@ -109,25 +109,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Driver: {}", driver.name());
     }
 
-    let scanned_files = Arc::new(Mutex::new(VecDeque::new()));
     let files_to_scan = Arc::new(Mutex::new(VecDeque::new()));
+    let tags_creator = Arc::new(Mutex::new(TagFileCreator::new()?));
+    let running = Arc::new(RwLock::new(true));
 
-    let mut tags_creator = TagFileCreator::new(
-            Arc::clone(&scanned_files) // Consumer
-    )?;
-
-    let crawler = Arc::new(FileCrawlerThread::new(
+    let crawler = FileCrawler::new(
         args.dir,
         make_excludes(args.excludes),
         Arc::clone(&files_to_scan), // Producer
-    ));
+    );
 
     let mut threads = Vec::with_capacity(args.jobs);
     (0..args.jobs).for_each(|_| {
         let files_to_scan = Arc::clone(&files_to_scan); // Consumer
-        let scanned_files = Arc::clone(&scanned_files); // Producer
+        let tags_creator = Arc::clone(&tags_creator);
+        let running = Arc::clone(&running);
         let driver = Arc::clone(&driver);
-        let crawler = Arc::clone(&crawler);
         threads.push(thread::spawn(move|| {
             loop {
                 let mut files = files_to_scan.lock().unwrap();
@@ -136,12 +133,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if driver.by_extension(&path) {
                         driver.inspect("Include [.ext]",
                                         &path, None, args.verbose);
-                        scanned_files.lock().unwrap().push_back(path);
+                        if ! args.inspect {
+                            tags_creator.lock().unwrap().writeln(&path).unwrap();
+                        }
                     } else if let Ok(mime) = driver.run(&path) {
                         if driver.by_mime(&path, &mime) {
                             driver.inspect("Include [mime]",
                                             &path, Some(&mime), args.verbose);
-                            scanned_files.lock().unwrap().push_back(path);
+                            if ! args.inspect {
+                                tags_creator.lock().unwrap().writeln(&path).unwrap();
+                            }
                         } else {
                             driver.inspect("Exclude [----]",
                                             &path, Some(&mime), false);
@@ -152,7 +153,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                 } else {
                     drop(files);
-                    if crawler.is_finished() {
+                    if ! *running.read().unwrap() {
                         break;
                     }
                 }
@@ -160,20 +161,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         }));
     });
 
-    if ! args.inspect {
-        while ! crawler.is_finished() ||
-              ! threads.iter().any(|t| t.is_finished()) {
-            tags_creator.run()?;
-        }
-    }
+    crawler.run()?;
+    *Arc::clone(&running).write().unwrap() = false;
 
     threads.into_iter().for_each(|t| {
         t.join().expect("Thread creation or execution failed.");
     });
-    Arc::into_inner(crawler)
-        .unwrap() // SAFETY: Does not panic, all threads terminated.
-        .join()
-        .expect("Crawler creation or execution failed.");
 
     Ok(())
 }
