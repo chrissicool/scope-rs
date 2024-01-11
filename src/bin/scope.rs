@@ -3,7 +3,7 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}, Mutex};
 use std::thread;
 
 extern crate clap;
@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let files_to_scan = Arc::new(Mutex::new(VecDeque::new()));
     let tags_creator = Arc::new(Mutex::new(TagFileCreator::new()?));
-    let running = Arc::new(RwLock::new(true));
+    let running = Arc::new(AtomicBool::new(true));
 
     let crawler = FileCrawler::new(
         args.dir,
@@ -123,8 +123,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     (0..args.jobs).for_each(|_| {
         let files_to_scan = Arc::clone(&files_to_scan); // Consumer
         let tags_creator = Arc::clone(&tags_creator);
-        let running = Arc::clone(&running);
         let driver = Arc::clone(&driver);
+        let running = Arc::clone(&running);
         threads.push(thread::spawn(move|| {
             loop {
                 let mut files = files_to_scan.lock().unwrap();
@@ -153,7 +153,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                 } else {
                     drop(files);
-                    if ! *running.read().unwrap() {
+                    if ! running.load(Ordering::Relaxed) {
                         break;
                     }
                 }
@@ -162,7 +162,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     crawler.run()?;
-    *Arc::clone(&running).write().unwrap() = false;
+    running.store(false, Ordering::Relaxed);
 
     threads.into_iter().for_each(|t| {
         t.join().expect("Thread creation or execution failed.");
