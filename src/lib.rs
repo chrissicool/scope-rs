@@ -38,13 +38,13 @@ impl Driver for FileDriver {
     }
 
     fn usable(&self) -> bool {
-        let mut cmd = Command::new("file");
-        cmd.args(["-b", "--mime-type"]);
-        cmd
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn().is_ok()
+        if let Ok(out) = Command::new("file").arg("-h").output() {
+            let s = String::from_utf8(out.stderr).unwrap_or_default();
+            if s.contains("--mime-type") {
+                return true;
+            }
+        }
+        false
     }
 
     fn run(&self, path: &Path) -> Result<String, Box<dyn Error>> {
