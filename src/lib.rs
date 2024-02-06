@@ -20,6 +20,42 @@ pub trait Driver
     fn run(&self, path: &Path) -> Result<String, Box<dyn Error>>;
 }
 
+/// A driver that uses the mimetype(1) tool for mime type checks.
+#[derive(Debug, Clone, Copy)]
+struct MimetypeDriver {}
+
+impl MimetypeDriver {
+    #[inline]
+    pub fn new() -> Self {
+        MimetypeDriver {}
+    }
+}
+
+impl Driver for MimetypeDriver {
+    #[inline]
+    fn name(&self) -> &str {
+        "mimetype"
+    }
+
+    fn usable(&self) -> bool {
+        let mut cmd = Command::new("mimetype");
+        cmd.args(["-h"]);
+        cmd
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn().is_ok()
+    }
+
+    fn run(&self, path: &Path) -> Result<String, Box<dyn Error>> {
+        let mut cmd = Command::new("mimetype");
+        cmd.args(["-b", "--mimetype"]);
+        let out = cmd.arg(path).output()?;
+        let s = String::from_utf8(out.stdout)?;
+        Ok(s.trim().into())
+    }
+}
+
 /// A driver that uses the file(1) tool for mime type checks.
 #[derive(Debug, Clone, Copy)]
 struct FileDriver {}
@@ -102,6 +138,7 @@ impl Driver for MimeDriver {
 enum GenericDriver {
     MimeDriver(MimeDriver),
     FileDriver(FileDriver),
+    MimetypeDriver(MimetypeDriver),
 }
 
 impl Driver for GenericDriver {
@@ -110,6 +147,7 @@ impl Driver for GenericDriver {
         match self {
             GenericDriver::MimeDriver(driver) => driver.name(),
             GenericDriver::FileDriver(driver) => driver.name(),
+            GenericDriver::MimetypeDriver(driver) => driver.name(),
         }
     }
 
@@ -118,6 +156,7 @@ impl Driver for GenericDriver {
         match self {
             GenericDriver::MimeDriver(driver) => driver.usable(),
             GenericDriver::FileDriver(driver) => driver.usable(),
+            GenericDriver::MimetypeDriver(driver) => driver.usable(),
         }
     }
 
@@ -126,6 +165,7 @@ impl Driver for GenericDriver {
         match self {
             GenericDriver::MimeDriver(driver) => driver.run(path),
             GenericDriver::FileDriver(driver) => driver.run(path),
+            GenericDriver::MimetypeDriver(driver) => driver.run(path),
         }
     }
 }
@@ -144,6 +184,12 @@ impl From<MimeDriver> for GenericDriver {
     }
 }
 
+impl From<MimetypeDriver> for GenericDriver {
+    #[inline]
+    fn from(driver: MimetypeDriver) -> GenericDriver {
+        GenericDriver::MimetypeDriver(driver)
+    }
+}
 
 /// A collection of all available drivers.
 ///
@@ -160,7 +206,11 @@ impl DriverList {
     pub fn new(select: Option<OsString>, inspect: bool) -> Self {
         let mut current: GenericDriver = MimeDriver::new().into();
         // Push order determines preference.
-        let drivers = vec![current, FileDriver::new().into()];
+        let drivers = vec![
+            current,
+            FileDriver::new().into(),
+            MimetypeDriver::new().into(),
+        ];
         for d in drivers.iter() {
             match select {
                 None => {
