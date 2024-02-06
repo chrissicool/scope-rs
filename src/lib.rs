@@ -94,16 +94,16 @@ impl Driver for FileDriver {
 
 /// A driver that uses the xdg-mime(1) tool for mime type checks.
 #[derive(Debug, Clone, Copy)]
-struct MimeDriver {}
+struct XdgMimeDriver {}
 
-impl MimeDriver {
+impl XdgMimeDriver {
     #[inline]
     pub fn new() -> Self {
-        MimeDriver {}
+        XdgMimeDriver {}
     }
 }
 
-impl Driver for MimeDriver {
+impl Driver for XdgMimeDriver {
     #[inline]
     fn name(&self) -> &str {
         "xdg-mime"
@@ -136,7 +136,7 @@ impl Driver for MimeDriver {
 // That also means to forward the interface accordingly.
 #[derive(Debug, Clone, Copy)]
 enum GenericDriver {
-    MimeDriver(MimeDriver),
+    XdgMimeDriver(XdgMimeDriver),
     FileDriver(FileDriver),
     MimetypeDriver(MimetypeDriver),
 }
@@ -145,7 +145,7 @@ impl Driver for GenericDriver {
     #[inline]
     fn name(&self) -> &str {
         match self {
-            GenericDriver::MimeDriver(driver) => driver.name(),
+            GenericDriver::XdgMimeDriver(driver) => driver.name(),
             GenericDriver::FileDriver(driver) => driver.name(),
             GenericDriver::MimetypeDriver(driver) => driver.name(),
         }
@@ -154,7 +154,7 @@ impl Driver for GenericDriver {
     #[inline]
     fn usable(&self) -> bool {
         match self {
-            GenericDriver::MimeDriver(driver) => driver.usable(),
+            GenericDriver::XdgMimeDriver(driver) => driver.usable(),
             GenericDriver::FileDriver(driver) => driver.usable(),
             GenericDriver::MimetypeDriver(driver) => driver.usable(),
         }
@@ -163,7 +163,7 @@ impl Driver for GenericDriver {
     #[inline]
     fn run(&self, path: &Path) -> Result<String, Box<dyn Error>> {
         match self {
-            GenericDriver::MimeDriver(driver) => driver.run(path),
+            GenericDriver::XdgMimeDriver(driver) => driver.run(path),
             GenericDriver::FileDriver(driver) => driver.run(path),
             GenericDriver::MimetypeDriver(driver) => driver.run(path),
         }
@@ -177,10 +177,10 @@ impl From<FileDriver> for GenericDriver {
     }
 }
 
-impl From<MimeDriver> for GenericDriver {
+impl From<XdgMimeDriver> for GenericDriver {
     #[inline]
-    fn from(driver: MimeDriver) -> GenericDriver {
-        GenericDriver::MimeDriver(driver)
+    fn from(driver: XdgMimeDriver) -> GenericDriver {
+        GenericDriver::XdgMimeDriver(driver)
     }
 }
 
@@ -204,7 +204,7 @@ pub struct DriverList {
 
 impl DriverList {
     pub fn new(select: Option<OsString>, inspect: bool) -> Self {
-        let mut current: GenericDriver = MimeDriver::new().into();
+        let mut current: GenericDriver = XdgMimeDriver::new().into();
         // Push order determines preference.
         let drivers = vec![
             current,
